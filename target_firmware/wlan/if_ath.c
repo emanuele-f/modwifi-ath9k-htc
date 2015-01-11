@@ -1765,6 +1765,32 @@ static void ath_dmesg(void *Context, A_UINT16 Command,
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &cmd_rsp, sizeof(cmd_rsp));
 }
 
+static void ath_reactivejam(void *Context, A_UINT16 Command,
+			    A_UINT16 SeqNo, A_UINT8 *buffer, a_int32_t Length)
+{
+	struct ath_softc_tgt *sc = (struct ath_softc_tgt *)Context;
+	WMI_REACTIVEJAM_CMD *cmd = (WMI_REACTIVEJAM_CMD*)buffer;
+	char reply[] = "TODO";
+	int i;
+
+	cmd->mduration = adf_os_ntohl(cmd->mduration);
+
+	printk("ReactJam ");
+	for (i = 0; i < 5; ++i) {
+		printk(itox(cmd->bssid[i]));
+		printk(":");
+	}
+	printk(itox(cmd->bssid[5]));
+	printk(" 0x");
+	printk(itox(cmd->mduration));
+	printk("ms\n");
+
+	// This is a blocking call
+	//attack_reactivejam(sc, cmd->bssid, duration);
+
+	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, reply, sizeof(reply));
+}
+
 static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 {
 	{handle_echo_command,         WMI_ECHO_CMDID,               0},
@@ -1802,6 +1828,7 @@ static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 
 	/** New commands */
 	{ath_dmesg,                   WMI_DEBUGMSG_CMDID,           0},
+	{ath_reactivejam,             WMI_REACTIVEJAM_CMDID,        0},
 };
 
 /*****************/

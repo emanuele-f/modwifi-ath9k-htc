@@ -166,6 +166,7 @@ typedef enum {
 
     /** New commands */
     WMI_DEBUGMSG_CMDID = 0x0080,
+    WMI_REACTIVEJAM_CMDID,
 } WMI_COMMAND_ID;
 
 /*
@@ -276,6 +277,17 @@ typedef PREPACK struct {
 	/** Debug message(s) **/
 	a_uint8_t buffer[40];
 } POSTPACK WMI_DEBUGMSG_RESP;
+
+/*
+ * WMI_REACTIVEJAM_CMDID
+ */
+typedef PREPACK struct {
+	/** target BSSID mac address */
+	a_uint8_t bssid[6];
+	/** duration in miliseconds */
+	a_uint32_t mduration;
+} POSTPACK WMI_REACTIVEJAM_CMD;
+
 
 /*
  * List of Events (target to host)
