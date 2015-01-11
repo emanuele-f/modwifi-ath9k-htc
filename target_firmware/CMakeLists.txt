@@ -37,6 +37,7 @@ SET(SOURCES
 	wlan/if_owl.c
 	wlan/if_ath.c
 	wlan/if_ath_pci.c
+	wlan/debug.c
 	magpie_fw_dev/target/wlan/wlan_pci.c
 	wlan/ieee80211_output.c
 	magpie_fw_dev/target/htc/htc.c
