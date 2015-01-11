@@ -163,6 +163,9 @@ typedef enum {
     WMI_RX_STATS_CMDID,
     WMI_BITRATE_MASK_CMDID,
     WMI_REG_RMW_CMDID,
+
+    /** New commands */
+    WMI_DEBUGMSG_CMDID = 0x0080,
 } WMI_COMMAND_ID;
 
 /*
@@ -258,6 +261,21 @@ typedef PREPACK struct {
     a_uint16_t     tupleNumH;
     WMI_AVT      avt[1];
 } POSTPACK WMI_ACCESS_MEMORY_CMD;
+
+/**
+ * WMI_DEBUGMSG_CMDID
+ */
+
+typedef PREPACK struct wmi_dmesg_cmd {
+	a_uint16_t offset;
+} POSTPACK WMI_DEBUGMSG_CMD;
+
+typedef PREPACK struct {
+	/** Length of zero signifies that no more data is available */
+	a_uint8_t length;
+	/** Debug message(s) **/
+	a_uint8_t buffer[40];
+} POSTPACK WMI_DEBUGMSG_RESP;
 
 /*
  * List of Events (target to host)

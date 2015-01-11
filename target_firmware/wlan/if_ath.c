@@ -1748,6 +1748,23 @@ static void ath_rc_mask_tgt(void *Context, A_UINT16 Command,
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, NULL, 0);
 }
 
+static void ath_dmesg(void *Context, A_UINT16 Command,
+				A_UINT16 SeqNo, A_UINT8 *buffer, a_int32_t Length)
+{
+	struct ath_softc_tgt *sc = (struct ath_softc_tgt *)Context;
+	WMI_DEBUGMSG_CMD *cmd = (WMI_DEBUGMSG_CMD *)buffer;
+	WMI_DEBUGMSG_RESP cmd_rsp;
+	unsigned int offset;
+	
+	A_MEMSET(&cmd_rsp, 0, sizeof(cmd_rsp));
+
+	offset = adf_os_ntohs(cmd->offset);
+	cmd_rsp.length = get_dmesg(offset, cmd_rsp.buffer,
+					 sizeof(cmd_rsp.buffer));
+
+	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &cmd_rsp, sizeof(cmd_rsp));
+}
+
 static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 {
 	{handle_echo_command,         WMI_ECHO_CMDID,               0},
@@ -1782,6 +1799,9 @@ static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 	{ath_rx_stats_tgt,            WMI_RX_STATS_CMDID,           0},
 	{ath_rc_mask_tgt,             WMI_BITRATE_MASK_CMDID,       0},
 	{ath_hal_reg_rmw_tgt,         WMI_REG_RMW_CMDID,            0},
+
+	/** New commands */
+	{ath_dmesg,                   WMI_DEBUGMSG_CMDID,           0},
 };
 
 /*****************/
