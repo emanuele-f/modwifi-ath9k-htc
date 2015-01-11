@@ -297,6 +297,11 @@ u_int64_t ar5416GetTsf64(struct ath_hal *ah)
 /******/
 /* RX */
 /******/
+a_uint32_t ar5416GetRxDP(struct ath_hal *ath)
+{
+	return ioread32_mac(AR_RXDP);
+}
+
 void ar5416SetRxDP(struct ath_hal *ah, a_uint32_t rxdp)
 {
 	iowrite32_mac(AR_RXDP, rxdp);
