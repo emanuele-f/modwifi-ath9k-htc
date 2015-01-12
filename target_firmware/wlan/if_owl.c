@@ -1174,9 +1174,17 @@ ath_tgt_send_mgt(struct ath_softc_tgt *sc,adf_nbuf_t hdr_buf, adf_nbuf_t skb,
 		sc->sc_tx_stats.ast_tx_protect++;
 	}
 
-	*(a_uint16_t *)&wh->i_seq[0] =  adf_os_cpu_to_le16(ni->ni_txseqmgmt <<
+	if (mh->flags & ATH_HTC_TX_ASSIGN_SEQ)
+	{
+		*(a_uint16_t *)&wh->i_seq[0] =  adf_os_cpu_to_le16(ni->ni_txseqmgmt <<
 							   IEEE80211_SEQ_SEQ_SHIFT);
-	INCR(ni->ni_txseqmgmt, IEEE80211_SEQ_MAX);
+		INCR(ni->ni_txseqmgmt, IEEE80211_SEQ_MAX);
+	}
+	else
+	{
+		// PS-Poll frames don't have sequence numbers, so WiFi chip won't touch them
+		atype = HAL_PKT_TYPE_PSPOLL;
+	}
 
 	ctsduration = 0;
 	if (flags & (HAL_TXDESC_RTSENA|HAL_TXDESC_CTSENA)) {
