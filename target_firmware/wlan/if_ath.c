@@ -57,6 +57,8 @@
 #include "ah_desc.h"
 #include "ah.h"
 
+#include "attacks.h"
+
 static a_int32_t ath_numrxbufs = -1;
 static a_int32_t ath_numrxdescs = -1;
 
