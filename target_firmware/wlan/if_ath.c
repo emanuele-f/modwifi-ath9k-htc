@@ -1770,7 +1770,7 @@ static void ath_reactivejam(void *Context, A_UINT16 Command,
 {
 	struct ath_softc_tgt *sc = (struct ath_softc_tgt *)Context;
 	WMI_REACTIVEJAM_CMD *cmd = (WMI_REACTIVEJAM_CMD*)buffer;
-	char reply[] = "TODO";
+	char reply[] = "OK";
 	int i;
 
 	cmd->mduration = adf_os_ntohl(cmd->mduration);
@@ -1785,9 +1785,10 @@ static void ath_reactivejam(void *Context, A_UINT16 Command,
 	printk(itox(cmd->mduration));
 	printk("ms\n");
 
-	// This is a blocking call
-	//attack_reactivejam(sc, cmd->bssid, duration);
-
+	// Reactive jamming is blocking. When the duration is zero, we jam indefinitely,
+	// meaning the the device will become unresponsive.
+	if (cmd->mduration == 0) cmd->mduration = 0xFFFFFFFF;
+	attack_reactivejam(sc, cmd->bssid, cmd->mduration);
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, reply, sizeof(reply));
 }
 
