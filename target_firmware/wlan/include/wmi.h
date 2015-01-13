@@ -167,6 +167,7 @@ typedef enum {
     /** New commands */
     WMI_DEBUGMSG_CMDID = 0x0080,
     WMI_REACTIVEJAM_CMDID,
+    WMI_FASTREPLY_CMDID,
 } WMI_COMMAND_ID;
 
 /*
@@ -287,6 +288,32 @@ typedef PREPACK struct {
 	/** duration in miliseconds */
 	a_uint32_t mduration;
 } POSTPACK WMI_REACTIVEJAM_CMD;
+
+/*
+ * WMI_FASTREPLY_CMDID
+ */
+typedef PREPACK struct {
+	a_uint8_t type;
+	union {
+		// transmit response packet in multiple commands
+		struct {
+			a_uint8_t length;
+			a_uint8_t offset;
+			a_uint8_t datalen;
+			a_uint8_t data[40];
+		} pkt;
+		// command to start monitoring
+		struct {
+			a_uint32_t mduration;
+			a_uint8_t source[6];
+		} start;
+	};
+} POSTPACK WMI_FASTREPLY_CMD;
+
+enum FASTREPLY_TYPE {
+	FASTREPLY_PACKET,
+	FASTREPLY_START
+};
 
 
 /*

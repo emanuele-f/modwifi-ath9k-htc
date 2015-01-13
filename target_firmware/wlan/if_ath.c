@@ -1794,6 +1794,38 @@ static void ath_reactivejam(void *Context, A_UINT16 Command,
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, reply, sizeof(reply));
 }
 
+static void ath_fastreply(void *Context, A_UINT16 Command,
+			  A_UINT16 SeqNo, A_UINT8 *buffer, a_int32_t Length)
+{
+	static uint8_t reply[256];
+	static int replylen;
+	static struct ath_tx_buf *bf = NULL;
+	struct ath_softc_tgt *sc = (struct ath_softc_tgt *)Context;
+	WMI_FASTREPLY_CMD *cmd = (WMI_FASTREPLY_CMD*)buffer;
+	int rval = 0;
+
+	if (cmd->type == FASTREPLY_PACKET && cmd->pkt.offset + cmd->pkt.datalen < sizeof(reply))
+	{
+		replylen = cmd->pkt.length;
+		A_MEMCPY(reply + cmd->pkt.offset, cmd->pkt.data, cmd->pkt.datalen);
+
+		if (replylen == cmd->pkt.offset + cmd->pkt.datalen) {
+			// FIXME: This memory needs to be properly freed
+			bf = attack_build_packet(sc, reply, replylen, 1, NULL);
+			if (bf == NULL) rval = 1;
+		}
+	}
+	else if (cmd->type == FASTREPLY_START)
+	{
+		unsigned int duration = adf_os_ntohl(cmd->start.mduration);
+
+		// TODO: fastreply using `bf` as a packet
+		printk("start fastreply\n");
+	}
+
+	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &rval, sizeof(rval));
+}
+
 static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 {
 	{handle_echo_command,         WMI_ECHO_CMDID,               0},
@@ -1832,6 +1864,7 @@ static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 	/** New commands */
 	{ath_dmesg,                   WMI_DEBUGMSG_CMDID,           0},
 	{ath_reactivejam,             WMI_REACTIVEJAM_CMDID,        0},
+	{ath_fastreply,               WMI_FASTREPLY_CMDID,          0},
 };
 
 /*****************/
