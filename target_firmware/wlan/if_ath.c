@@ -1820,10 +1820,57 @@ static void ath_fastreply(void *Context, A_UINT16 Command,
 		unsigned int duration = adf_os_ntohl(cmd->start.mduration);
 
 		// TODO: fastreply using `bf` as a packet
+		(void)duration;
 		printk("start fastreply\n");
 	}
 
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &rval, sizeof(rval));
+}
+
+static void ath_constantjam(void *Context, A_UINT16 Command,
+			      A_UINT16 SeqNo, A_UINT8 *buffer, a_int32_t Length)
+{
+	static int constjam_running = 0;
+	struct ath_softc_tgt *sc = (struct ath_softc_tgt *)Context;
+	WMI_CONSTANTJAM_CMD *cmd = (WMI_CONSTANTJAM_CMD*)buffer;
+	WMI_CONSTANTJAM_RESP cmd_resp;
+
+	cmd->len = adf_os_ntohs(cmd->len);
+
+	switch (cmd->request)
+	{
+	case CONSTJAM_START:
+		if (constjam_running) break;
+
+		if (cmd->conf_radio) {
+			// jamming of the channel, other clients can't see any traffic and sense channel busy
+			printk("contjam+radio\n");
+			attack_confradio(sc);
+			attack_constantjam_start(sc, 0, NULL, cmd->len);
+		} else {
+			// uninterrupted packet injection, useful to test number of packets per second possible
+			printk("contjam\n");
+			attack_constantjam_start(sc, 1, NULL, cmd->len);
+		}
+
+		constjam_running = 1;
+		break;
+
+	case CONSTJAM_STOP:
+		if (!constjam_running) break;
+
+		printk("stopjam\n");
+		attack_constantjam_stop(sc);
+		constjam_running = 0;
+		break;
+
+	case CONSTJAM_STATUS:
+		// Nothing special needed, status is always filled in.
+		break;
+	}
+
+	cmd_resp.status = constjam_running;
+	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &cmd_resp, sizeof(cmd_resp));
 }
 
 static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
@@ -1865,6 +1912,7 @@ static WMI_DISPATCH_ENTRY Magpie_Sys_DispatchEntries[] =
 	{ath_dmesg,                   WMI_DEBUGMSG_CMDID,           0},
 	{ath_reactivejam,             WMI_REACTIVEJAM_CMDID,        0},
 	{ath_fastreply,               WMI_FASTREPLY_CMDID,          0},
+	{ath_constantjam,             WMI_CONSTANTJAM_CMDID,        0},
 };
 
 /*****************/

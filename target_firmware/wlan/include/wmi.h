@@ -168,6 +168,7 @@ typedef enum {
     WMI_DEBUGMSG_CMDID = 0x0080,
     WMI_REACTIVEJAM_CMDID,
     WMI_FASTREPLY_CMDID,
+    WMI_CONSTANTJAM_CMDID,
 } WMI_COMMAND_ID;
 
 /*
@@ -288,6 +289,30 @@ typedef PREPACK struct {
 	/** duration in miliseconds */
 	a_uint32_t mduration;
 } POSTPACK WMI_REACTIVEJAM_CMD;
+
+/*
+ * WMI_CONSTANTJAM_CMDID
+ */
+
+typedef PREPACK struct {
+	/** A value from CONSTJAM_REQUEST to denote the request */
+	a_uint8_t request;
+	/** Set to 1 to disable CS and inter-frame-timeouts */
+	a_uint8_t conf_radio;
+	/** Length of the packet which is continuously transmitted */
+	a_uint16_t len;
+} POSTPACK WMI_CONSTANTJAM_CMD;
+
+typedef PREPACK struct {
+	/** Is 1 when jammer is running, 0 otherwise */
+	a_uint8_t status;
+} POSTPACK WMI_CONSTANTJAM_RESP;
+
+enum CONSTJAM_REQUEST {
+	CONSTJAM_START,
+	CONSTJAM_STOP,
+	CONSTJAM_STATUS
+};
 
 /*
  * WMI_FASTREPLY_CMDID

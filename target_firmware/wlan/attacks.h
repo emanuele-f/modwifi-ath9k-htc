@@ -9,6 +9,9 @@ struct ath_tx_buf * attack_build_packet(struct ath_softc_tgt *sc, uint8_t *data,
 // Attack implementations
 int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 		       unsigned int msecs);
+int attack_constantjam_start(struct ath_softc_tgt *sc, char waitack,
+			     unsigned char destmac[6], a_uint16_t length);
+int attack_constantjam_stop(struct ath_softc_tgt *sc);
 
 #endif // ATTACKS_H
 
