@@ -102,12 +102,13 @@ int attack_confradio(struct ath_softc_tgt *sc)
  *           is overwritten with that of the wireless chip (so we can detect ACKs).
  * @destmac: destination MAC address to use. Can be set to NULL to ignore. Usefull
  *           if you give a NULL data buffer.
+ *
+ * FIXME: Perhaps just use ath_tgt_send_mgt without the last ath_tgt_txqaddbuf call?
  */
 struct ath_tx_buf * attack_build_packet(
 	struct ath_softc_tgt *sc, uint8_t *data,
 	a_int32_t len, char waitack, unsigned char destmac[6])
 {
-	struct ath_tx_desc *ds0, *ds;
 	struct ieee80211_node_target *ni;
 	struct ath_hal *ah = sc->sc_ah;
 	a_uint8_t txrate;
@@ -131,21 +132,8 @@ struct ath_tx_buf * attack_build_packet(
 	rcs[0].tries = ATH_TXMAXTRY;
 	rcs[0].flags = 0;
 
-	// TODO !!!!
-#if 0
-	// Mathy: Force a specific rate if requested
-	if (sc->sc_forcerate && sc->sc_forcedratetable) {
-		printk("att_bld_rx_pkt: forcerate\n");
-		rcs[0].rix = sc->sc_fixedrate;
-		rt = sc->sc_forcedratetable;
-	} else {
-		rt = sc->sc_currates;
-	}
-#else
-	rt = sc->sc_currates;
-#endif
-
 	adf_os_assert(sc->sc_currates != NULL);
+	rt = sc->sc_currates;
 	txrate = rt->info[rcs[0].rix].rateCode;
 
 	for (i=0; i < 4; i++) {
@@ -166,15 +154,15 @@ struct ath_tx_buf * attack_build_packet(
 		return NULL;
 	}
 	buff = adf_nbuf_put_tail(skb, len);
+
+	// fill main packet content
 	if (data)
 		adf_os_mem_copy(buff, data, len);
 	else
 		adf_os_mem_set(buff, 0x88, len);
 
 	// set destination mac if given
-	if (destmac) {
-		adf_os_mem_copy(buff + 4, destmac, 6);
-	}
+	if (destmac) adf_os_mem_copy(buff + 4, destmac, 6);
 
 	// include sender MAC address if enough room AND ack retransmit is requesteds
 	if (waitack && len >= 4 + 6 + 6)
@@ -190,13 +178,8 @@ struct ath_tx_buf * attack_build_packet(
 		buff[4 + 6 + 5] = (id1 >> 8 ) & 0xFF;
 	}
 
-	//dump_skb(skb);
-	//dump_ath_data_hdr_t(mh);
-
 	hdrlen = ieee80211_anyhdrsize(buff);
-	pktlen = len;
-	// XXX
-	pktlen -= (hdrlen & 3);
+	pktlen = len - (hdrlen & 3);
 	pktlen += IEEE80211_CRC_LEN;
 
 	// sc->sc_sta[0] is of type struct ath_node_target *
@@ -228,8 +211,7 @@ struct ath_tx_buf * attack_build_packet(
 	// Step 3 - Build descriptor buffer
 	//	
 
-	if (!waitack)
-		bf->bf_flags |= HAL_TXDESC_NOACK;
+	if (!waitack) bf->bf_flags |= HAL_TXDESC_NOACK;
 
 	// Sets control/status flags in ath_tx_desc. See ar5416_hw.c:ar5416SetupTxDesc_20.
 	ah->ah_setupTxDesc(bf->bf_desc
@@ -245,31 +227,7 @@ struct ath_tx_buf * attack_build_packet(
 			    , 0				  /* XXX - rts/cts duration */
 			    );
 
-	// TODO FIXME
-	// ath_filltxdesc(sc, bf);
-	{
-		ds0 = ds = bf->bf_desc;
-		adf_nbuf_dmamap_info(bf->bf_dmamap, &bf->bf_dmamap_info);
-
-		for (i = 0; i < bf->bf_dmamap_info.nsegs; i++, ds++) {
-
-			ds->ds_data = bf->bf_dmamap_info.dma_segs[i].paddr;
-
-			// Link to the next, (i + 1)th, desc. if it exists.
-			if (i == (bf->bf_dmamap_info.nsegs - 1)) {
-				ds->ds_link = 0;
-				bf->bf_lastds = ds;
-			} else
-				ds->ds_link = (adf_os_dma_addr_t)(&bf->bf_descarr[i+1]);
-
-			// Fills in some control words in the ath_tx_desc struct
-			ah->ah_fillTxDesc(ds
-					   , bf->bf_dmamap_info.dma_segs[i].len		/* Segment length */
-					   , i == 0					/* First segment? */
-					   , i == (bf->bf_dmamap_info.nsegs - 1)	/* Last segment? */
-					   , ds0);					/* First descriptor */
-		}
-	}
+	ath_filltxdesc(sc, bf);
 
 	// sets various control registers in ath_bf_desc
 	ah->ah_set11nRateScenario(bf->bf_desc, 0 /* durUpdateEn */, 0 /* ctsrate */, series, 4, 0 /* flags */);

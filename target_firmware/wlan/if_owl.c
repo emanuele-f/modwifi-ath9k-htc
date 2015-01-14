@@ -234,7 +234,7 @@ void ath_dma_unmap(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 	adf_nbuf_unmap( sc->sc_dev, bf->bf_dmamap, ADF_OS_DMA_TO_DEVICE);
 }
 
-static void ath_filltxdesc(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+void ath_filltxdesc(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 {
 	struct ath_tx_desc *ds0, *ds = bf->bf_desc;
 	struct ath_hal *ah = sc->sc_ah;
