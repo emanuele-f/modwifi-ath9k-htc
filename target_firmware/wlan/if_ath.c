@@ -2086,6 +2086,7 @@ a_int32_t ath_tgt_attach(a_uint32_t devid, struct ath_softc_tgt *sc, adf_os_devi
 	}
 
 	BUF_Pool_create_pool(sc->pool_handle, POOL_ID_WLAN_RX_BUF, ath_numrxdescs, 1664);
+	BUF_Pool_create_pool(sc->pool_handle, POOL_ID_ATTACKS, 5, 300);
 
 	ath_tgt_txq_setup(sc);
 	sc->sc_imask =0;

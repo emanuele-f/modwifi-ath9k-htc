@@ -226,7 +226,7 @@ static void ath_dma_map(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 	adf_nbuf_map(sc->sc_dev, bf->bf_dmamap, skb, ADF_OS_DMA_TO_DEVICE);
 }
 
-static void ath_dma_unmap(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+void ath_dma_unmap(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 {
 	adf_nbuf_t skb = bf->bf_skb;
 
@@ -987,8 +987,21 @@ ath_tgt_tx_send_normal(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 	bf->bf_txq_add(sc, bf);
 }
 
-static void
-ath_tx_freebuf(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+void ath_tx_freedesc(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+{
+	bf->bf_skb = NULL;
+	bf->bf_comp = NULL;
+	bf->bf_node = NULL;
+	bf->bf_next = NULL;
+	bf = ath_buf_toggle(sc, bf, 0);
+	bf->bf_retries = 0;
+	bf->bf_isretried = 0;
+
+	if (bf != NULL)
+		asf_tailq_insert_tail(&sc->sc_txbuf, bf, bf_list);
+}
+
+static void ath_tx_freebuf(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 {
 	a_int32_t i ;
 	struct ath_tx_desc *bfd = NULL;
@@ -1001,19 +1014,8 @@ ath_tx_freebuf(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 	}
 
 	ath_dma_unmap(sc, bf);
-
 	ath_tgt_skb_free(sc, &bf->bf_skbhead,bf->bf_endpt);
-
-	bf->bf_skb = NULL;
-	bf->bf_comp = NULL;
-	bf->bf_node = NULL;
-	bf->bf_next = NULL;
-	bf = ath_buf_toggle(sc, bf, 0);
-	bf->bf_retries = 0;
-	bf->bf_isretried = 0;
-
-	if (bf != NULL)
-		asf_tailq_insert_tail(&sc->sc_txbuf, bf, bf_list);
+	ath_tx_freedesc(sc, bf);
 }
 
 static void

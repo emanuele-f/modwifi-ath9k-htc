@@ -159,8 +159,8 @@ struct ath_tx_buf * attack_build_packet(
 	// Step 2 - Build ath_tx_buff
 	//
 
-	// TODO: Improve function interface...
-	skb = adf_nbuf_alloc(len, 0, 0);
+	// Allocate skb for the packets
+	skb = BUF_Pool_alloc_buf_align(sc->pool_handle, POOL_ID_ATTACKS, len, 0);
 	if (skb == NULL) {
 		printk("adf_nbuf_alloc failed\n");
 		return NULL;
@@ -201,13 +201,14 @@ struct ath_tx_buf * attack_build_packet(
 
 	// sc->sc_sta[0] is of type struct ath_node_target *
 	ni = &sc->sc_sta[0].ni;
-	if (!sc->sc_sta[0].an_valid || ni->ni_vap == NULL) return 0;
+	if (!sc->sc_sta[0].an_valid || ni->ni_vap == NULL) goto fail;
 
-	// Get first number in the queue and then remove it from the queue - see ath_tx_buf_alloc
+	// Get a transmit descriptor buffer for the packet
 	bf = asf_tailq_first(&sc->sc_txbuf);
 	if (!bf) {
-		//printk("asf_tailq_first failed\n");
-		return 0;
+		printk("asf_tailq_first failed\n");
+		BUF_Pool_free_buf(sc->pool_handle, POOL_ID_ATTACKS, skb);
+		return NULL;
 	}
 	asf_tailq_remove(&sc->sc_txbuf, bf, bf_list);
 
@@ -274,9 +275,42 @@ struct ath_tx_buf * attack_build_packet(
 	ah->ah_set11nRateScenario(bf->bf_desc, 0 /* durUpdateEn */, 0 /* ctsrate */, series, 4, 0 /* flags */);
 
 	return bf;
+
+fail:
+	attack_free_packet(sc, bf);
+	return NULL;
 }
 
 
+static void attack_skb_free(struct ath_softc_tgt *sc,
+			     adf_nbuf_queue_t *head,
+			     HTC_ENDPOINT_ID endpt)
+{
+	adf_nbuf_t tskb;
+
+	while (adf_nbuf_queue_len(head) != 0) {
+		tskb = adf_nbuf_queue_remove(head);
+		BUF_Pool_free_buf(sc->pool_handle, POOL_ID_ATTACKS, tskb);
+	}
+}
+
+
+void attack_free_packet(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+{
+	a_int32_t i ;
+	struct ath_tx_desc *bfd = NULL;
+	struct ath_hal *ah = sc->sc_ah;
+
+	for (bfd = bf->bf_desc, i = 0; i < bf->bf_dmamap_info.nsegs; bfd++, i++) {
+		ah->ah_clr11nAggr(bfd);
+		ah->ah_set11nBurstDuration(bfd, 0);
+		ah->ah_set11nVirtualMoreFrag(bfd, 0);
+	}
+
+	ath_dma_unmap(sc, bf);
+	attack_skb_free(sc, &bf->bf_skbhead,bf->bf_endpt);
+	ath_tx_freedesc(sc, bf);
+}
 
 
 /**
@@ -307,17 +341,14 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	ah->ah_setInterrupts(sc->sc_ah, 0);
 	attack_confradio(sc);
 
-	// Lazily allocated buffer -- TODO: how to properly free this memory?
-	if (bf == NULL) {
-		A_MEMSET(&wh, 2, sizeof(wh));
-		// Do not retransmit dummy packet to jam. Change 3rd parameter
-		// to 1 to retransmit the dummy packet.
-		bf = attack_build_packet(sc, (uint8_t*)&wh, sizeof(wh), 0, NULL);
-	}
+	// Do not retransmit dummy packet to jam. Change 3rd parameter
+	// to 1 to retransmit the dummy packet.
+	bf = attack_build_packet(sc, (uint8_t*)&wh, sizeof(wh), 0, NULL);
+	A_MEMSET(&wh, 2, sizeof(wh));
 
 	// add buffer to the Tx list, save ath_tx_desc of the buffer
 	txq = &sc->sc_txq[TXQUEUE];
-	ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
+	//ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
 	txq->axq_link = &bf->bf_lastds->ds_link;
 	txads = AR5416DESC_20(bf->bf_desc);
 
@@ -438,6 +469,8 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	// re-enable interrupts
 	ah->ah_setInterrupts(sc->sc_ah, sc->sc_imask);
 
+	// free memory and return
+	attack_free_packet(sc, bf);
 	printk("<reactjam\n");
 
 	return 0;
