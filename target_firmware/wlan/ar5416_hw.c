@@ -383,8 +383,12 @@ HAL_STATUS ar5416ProcRxDescFast_20(struct ath_hal *ah, struct ath_rx_desc *ds,
 	 * once and picked it up again...make sure the hw has moved on.
 	 */
 	if ((ands->ds_rxstatus8 & AR_RxDone) == 0
-	    && ioread32_mac(AR_RXDP) == pa)
+	    && ioread32_mac(AR_RXDP) == pa) {
+#ifdef DEBUG_RXQUEUE
+		printk("!");
+#endif
 		return HAL_EINPROGRESS;
+	}
 
 	/*
 	 * Now we need to get the stats from the descriptor. Since desc are 

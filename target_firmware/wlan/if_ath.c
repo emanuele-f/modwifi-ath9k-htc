@@ -331,6 +331,10 @@ static void ath_uapsd_processtriggers(struct ath_softc_tgt *sc)
 	a_uint16_t frame_len = 0;
 	a_uint64_t tsf;
 
+#ifdef DEBUG_RXQUEUE
+	printk(".");
+#endif
+
 #define	PA2DESC(_sc, _pa)						\
 	((struct ath_desc *)((caddr_t)(_sc)->sc_rxdma.dd_desc +		\
 			     ((_pa) - (_sc)->sc_rxdma.dd_desc_paddr)))
@@ -379,16 +383,25 @@ static void ath_uapsd_processtriggers(struct ath_softc_tgt *sc)
 		}
 
 		if (ds->ds_link == 0) {
+#ifdef DEBUG_RXQUEUE
+			printk("0");
+#endif
 			break;
 		}
 
 		if (bf->bf_status & ATH_BUFSTATUS_DONE) {
+#ifdef DEBUG_RXQUEUE
+			printk("D");
+#endif
 			continue;
 		}
 
 		retval = ah->ah_procRxDescFast(ah, ds, ds->ds_daddr,
 						PA2DESC(sc, ds->ds_link), &bf->bf_rx_status);
 		if (HAL_EINPROGRESS == retval) {
+#ifdef DEBUG_RXQUEUE
+			printk("P");
+#endif
 			break;
 		}
 
@@ -449,8 +462,11 @@ static void ath_uapsd_processtriggers(struct ath_softc_tgt *sc)
 		else {
 			ds = asf_tailq_next(ds, ds_list);
 		}
-	}
 
+#ifdef DEBUG_RXQUEUE
+		printk(">");
+#endif
+	}
 #undef PA2DESC
 }
 
@@ -935,6 +951,7 @@ static a_int32_t ath_desc_alloc(struct ath_softc_tgt *sc)
 	asf_tailq_init(&sc->sc_rxdesc);
 	asf_tailq_init(&sc->sc_rxdesc_idle);
 
+	/** this works because descriptors follow eachother linearly in memory */
 	for (i = 0; i < ath_numrxdescs; i++, ds++) {
 
 		if (ds->ds_nbuf != ADF_NBUF_NULL) {
@@ -1053,6 +1070,15 @@ adf_os_irq_resp_t ath_intr(adf_drv_handle_t hdl)
 		if (status & (HAL_INT_RX | HAL_INT_RXEOL | HAL_INT_RXORN)) {
 			if (status & HAL_INT_RX)
 				sc->sc_int_stats.ast_rx++;
+
+#ifdef DEBUG_RXQUEUE
+			if (status & HAL_INT_RX)
+				printk("\niR");
+			if (status & HAL_INT_RXEOL)
+				printk("\niE");
+			if (status & HAL_INT_RXORN)
+				printk("\niO");
+#endif
 
 			ath_uapsd_processtriggers(sc);
 
