@@ -1,10 +1,15 @@
 #include <adf_os_types_pvt.h> // otherwise other includes fail
 #include <cmnos_api.h>
 
+#include "if_athvar.h"
+
 #include "ah.h"
 #include "ah_internal.h"
 #include "wlan_hdr.h"
 #include "debug.h"
+
+#include "ar5416reg.h"
+#include "ar5416desc.h"
 
 /** Can't be too large, otherwise it wont fit in dram_seg */
 #define BUFFSIZE	2048
@@ -97,6 +102,40 @@ void dump_buffer(unsigned char *buffer, int size)
 
 /** Uncomment if you need these, they waste precious space otherwise */
 #if 0
+
+static void dump_ar5416_desc(struct ar5416_desc_20 *ds)
+{
+	// `ds->ds_daddr` is the physical address, which is equal to the virtual addess `ds`
+	while (ds != NULL) {
+		// Dump pointer and pointer to data
+		printk("[");
+		printk(itox((unsigned int)ds));
+		printk("| ");
+		printk(itox(ds->ds_data));
+		printk(" ");
+
+		printk((ds->ds_ctl1 & AR_RxIntrReq) ? "I" : " ");
+		printk((ds->ds_rxstatus8 & AR_RxDone) ? "D" : " ");
+
+		ds = (struct ar5416_desc_20 *)ds->ds_link;
+		printk("]");
+	}
+
+	printk("\n");
+}
+
+void dump_rx_macbufs(struct ath_hal *ah)
+{
+	struct ar5416_desc_20 *ds = (struct ar5416_desc_20 *)ioread32_mac(AR_RXDP);
+	dump_ar5416_desc(ds);
+}
+
+void dump_rx_tailq(struct ath_softc_tgt *sc)
+{
+	// `ds->ds_daddr` is the physical address, which is equal to the virtual addess `ds`
+	struct ar5416_desc_20 *ds = (struct ar5416_desc_20 *)asf_tailq_first(&sc->sc_rxdesc);
+	dump_ar5416_desc(ds);
+}
 
 void dump_skb(adf_nbuf_t skb)
 {

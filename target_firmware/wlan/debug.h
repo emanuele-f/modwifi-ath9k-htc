@@ -15,6 +15,8 @@ const char *itox(unsigned int val);
 /** Get the current debug messages, starting from a given offset */
 unsigned int get_dmesg(unsigned int offset, char *buffer, unsigned int length);
 
+void dump_rx_macbufs(struct ath_hal *ah);
+void dump_rx_tailq(struct ath_softc_tgt *sc);
 void dump_buffer(unsigned char *buffer, int size);
 
 void dump_skb(adf_nbuf_t skb);
