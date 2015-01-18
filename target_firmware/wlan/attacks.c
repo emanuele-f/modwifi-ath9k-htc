@@ -286,11 +286,9 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 {
 	static const int TXQUEUE = 0;
 	static struct ath_tx_buf *bf;
-	static struct ieee80211_frame wh;
 	struct ath_hal *ah = sc->sc_ah;
 	struct ath_rx_desc *ds, *ds2;
 	struct ar5416_desc_20 *ads, *ads2, *txads;
-	struct ath_txq *txq;
 	volatile unsigned char *buff;
 	unsigned int elapsed, freq, prev;
 
@@ -300,15 +298,15 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 
 	// disable (simulated) interrupts and configure radio
 	ah->ah_setInterrupts(sc->sc_ah, 0);
+
+	//
+	// Prepare for transmission of injected packet
+	//	
+
 	attack_confradio(sc);
 
-	// Do not retransmit dummy packet to jam. Change 3rd parameter
-	// to 1 to retransmit the dummy packet.
+	// Change 3rd parameter to 1 to retransmit the dummy packet.
 	bf = attack_build_packet(sc, NULL, 24, 0, NULL);
-
-	// Borrow a transmit descriptor
-	txq = &sc->sc_txq[TXQUEUE];
-	txq->axq_link = &bf->bf_lastds->ds_link;
 	txads = AR5416DESC_20(bf->bf_desc);
 
 	//
@@ -389,8 +387,8 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_DIAG_SW)) |= AR_DIAG_RX_ABORT;
 
 			// Jam the packet
-			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(txq->axq_qnum))) = (a_uint32_t)txads;
-			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_Q_TXE)) = 1 << txq->axq_qnum;
+			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(TXQUEUE))) = (a_uint32_t)txads;
+			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_Q_TXE)) = 1 << TXQUEUE;
 
 			// Re-enable Rx for once packet is transmitted
 			iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_ABORT);
@@ -424,7 +422,8 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	//dump_rx_tailq(sc);
 
 	// remove pointer to packet ready to transmit
-	*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(txq->axq_qnum))) = 0;
+	ah->ah_abortTxDma(ah);
+	*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(TXQUEUE))) = 0;
 
 	// Assure Rx is still enabled
 	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_DIS);
