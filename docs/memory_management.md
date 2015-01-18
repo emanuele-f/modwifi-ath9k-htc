@@ -5,14 +5,14 @@ In this document *firmware* refers to the code we can change, while *ROM OS* ref
 
 ## Transmiting Packets
 
-Packets that have to be transmitted are given to the firmware by the ROM OS. The firmware registers callbacks that handle these packets. Important callbacks are:
+Packets that have to be transmitted are given to the firmware by the ROM OS. The firmware registers callbacks to be notified when packets are requested to be transmitted. Important callbacks are:
 
 1. `tgt_HTCRecv_mgmthandler`: Responsible for transmitting management frames (e.g. probe requests). With our modified drivers this is also used to transmit injected packets.
 2. `tgt_HTCRecvMessageHandler`: Responsible for transmitting data frames.
 
 The data for these packets is allocated by the ROM OS in a `adf_nbuf_t` buffer. Nevertheless, these buffers will have to be encapsulated in a transmit descriptor. And these transmit descriptors are managed by the firmware and not the ROM OS.
 
-Transmit descriptors are allocated in `ath_tgt_attach` using `ath_desc_alloc` and are put into a list (also see recieve path info). An important remark is that `ath_desc_alloc` allocated descriptors (not buffers) for both the recieve and transmit queue, as well as for beacons. This is is stored in the field `sc_txbuf`. Note that `ath_descdma_setup` is given a pointer to this field, but does not use a for loop to allocate all the buffers! Instead it does one big allocation using `adf_os_dmamem_alloc` of `descSize * nbuf * ndesc` bytes. This big chunk is then divided into packets, and each packet is added to a list. These descriptors are "freed" when shutting down the device. However these free calls are actually just NOPs. Throughout the firmware code you will notice descriptors taken from, and added to, the `sc_txbuf` list. This represents allocation and deallocation of memory! In particular the utility function `ath_tx_freebuf` is used to add descriptors back to the list (and to free the `adf_nbuf_t`, see below). Two example locations where these are freed:
+Transmit descriptors are allocated in `ath_tgt_attach` using `ath_desc_alloc` and are put into a list (also see recieve path info). An important remark is that `ath_desc_alloc` allocates descriptors (not buffers) for both the recieve and transmit queue, as well as for beacons. This is is stored in the field `sc_txbuf`. Note that `ath_descdma_setup` is given a pointer to this field, but does not use a for loop to allocate all the buffers! Instead it does one big allocation using `adf_os_dmamem_alloc` of `descSize * nbuf * ndesc` bytes. This big chunk is then divided into packets, and each packet is added to a list. These descriptors are "freed" when shutting down the device. However these free calls are actually just NOPs. Throughout the firmware code you will notice descriptors taken from, and added to, the `sc_txbuf` list. This represents allocation and deallocation of memory! In particular the utility function `ath_tx_freebuf` is used to add descriptors back to the list (and to free the `adf_nbuf_t`, see below). Two example locations where these are freed:
 
 1. `ath_buf_comp` which seems to be used for management packets (called after `tgt_HTCRecv_mgmthandler` ?).
 2. `ath_tx_freebuf` which seems to be used for data packets (called after `tgt_HTCRecvMessageHandler` ?).
