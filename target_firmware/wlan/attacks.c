@@ -77,8 +77,8 @@ int attack_confradio(struct ath_softc_tgt *sc)
 	iowrite32_mac(AR_D_GBL_IFS_EIFS, 1);
 
 	/* Disable backoff behaviour by setting parameters to zero */
-	for (q = 0; q < 4; q++) {
-		/* Reset CW_MIN, CW_MAX, and AIFSN for every Access Class */
+	for (q = 0; q < HAL_NUM_TX_QUEUES; q++) {
+		/* Reset CW_MIN, CW_MAX, and AIFSN for every transmit queue */
 		iowrite32_mac(AR_DLCL_IFS(q), 0);
 	}
 
@@ -280,6 +280,7 @@ void attack_free_packet(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
  * - Send larger packets so there is more overlap.
  * - Properly free the memory. Now we construct a buffer lazily and don't free it.
  * - Call the "OS update tick" routine so we don't manually have to manage the clock.
+ * - Make more usage of the functions in ar5416_hw.c
  */
 int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 		       unsigned int msecs)
