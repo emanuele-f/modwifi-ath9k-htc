@@ -445,6 +445,7 @@ int attack_constantjam_start(struct ath_softc_tgt *sc, char waitack,
 			     unsigned char destmac[6], a_uint16_t length)
 {
 	// No public implementation! If you are a researcher, you can request the code.
+	printk("constantjam_start not implemented\n");
 	return 1;
 }
 
@@ -452,6 +453,7 @@ int attack_constantjam_start(struct ath_softc_tgt *sc, char waitack,
 int attack_constantjam_stop(struct ath_softc_tgt *sc)
 {
 	// No public implementation! If you are a researcher, you can request the code.
+	printk("constantjam_stop not implemented\n");
 	return 1;
 }
 
