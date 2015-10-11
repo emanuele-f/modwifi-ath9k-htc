@@ -9,7 +9,7 @@ if [ "$?" -eq 0 -a "$#" -le 0 ]; then
 	case $response in
 		[yY][eE][sS]|[yY]) 
 			sudo cp ./target_firmware/htc_7010.fw /lib/firmware/htc_7010.fw
-		        sudo cp ./target_firmware/htc_9271.fw /lib/firmware/htc_9271.fw
+			sudo cp ./target_firmware/htc_9271.fw /lib/firmware/htc_9271.fw
 			;;
 		*)
 			echo "Skipping installation..."
