@@ -164,8 +164,8 @@ struct ath_tx_buf * attack_build_packet(
 	// set destination mac if given
 	if (destmac) adf_os_mem_copy(buff + 4, destmac, 6);
 
-	// include sender MAC address if enough room AND ack retransmit is requesteds
-	if (waitack && len >= 4 + 6 + 6)
+	// include sender MAC address if enough room, to discourage malicious usage
+	if (len >= 4 + 6 + 6)
 	{
 		unsigned int id0 = ioread32_mac(AR_STA_ID0);
 		unsigned int id1 = ioread32_mac(AR_STA_ID1);
