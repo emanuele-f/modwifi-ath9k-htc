@@ -501,6 +501,12 @@ HAL_BOOL ar5416UpdateTxTrigLevel(struct ath_hal *ah, HAL_BOOL bIncTrigLevel)
         return (newLevel != curLevel);
 }
 
+a_uint32_t ar5416GetTxDP(struct ath_hal *ah, a_uint32_t q)
+{
+        HALASSERT(q < AH_PRIVATE(ah)->ah_caps.halTotalQueues);
+        return ioread32_mac(AR_QTXDP(q));
+}
+
 HAL_BOOL ar5416SetTxDP(struct ath_hal *ah, a_uint32_t q, a_uint32_t txdp)
 {
         HALASSERT(q < AH_PRIVATE(ah)->ah_caps.halTotalQueues);
