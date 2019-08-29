@@ -171,6 +171,7 @@ typedef enum {
     WMI_CONSTANTJAM_CMDID,
 } WMI_COMMAND_ID;
 
+
 /*
  * Frame Types
  */
@@ -339,7 +340,6 @@ enum FASTREPLY_TYPE {
 	FASTREPLY_PACKET,
 	FASTREPLY_START
 };
-
 
 /*
  * List of Events (target to host)

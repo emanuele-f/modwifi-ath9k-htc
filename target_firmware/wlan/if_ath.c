@@ -58,6 +58,7 @@
 #include "ah.h"
 
 #include "attacks.h"
+#include "modwifi.h"
 
 static a_int32_t ath_numrxbufs = -1;
 static a_int32_t ath_numrxdescs = -1;
@@ -779,10 +780,19 @@ static void tgt_HTCRecvMessageHandler(HTC_ENDPOINT_ID EndPt,
 		return;
 	}
 
+#ifdef DEBUG_INJECT_AMPDU
+	printk("RecvMsg: aggr=");
+	if (tid != NULL)
+		printk(itox(!!(tid->flag & TID_AGGR_ENABLED)));
+	if (modwifi_txampdu_check(buf, NULL))
+		printk(" force");
+	printk("\n");
+#endif
+
 	bf->bf_endpt = EndPt;
 	bf->bf_cookie = dh->cookie;
 
-	if (tid->flag & TID_AGGR_ENABLED)
+	if ( (tid->flag & TID_AGGR_ENABLED) || modwifi_txampdu_check(buf, NULL))
 		ath_tgt_handle_aggr(sc, bf);
 	else
 		ath_tgt_handle_normal(sc, bf);

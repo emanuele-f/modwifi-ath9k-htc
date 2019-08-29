@@ -158,6 +158,14 @@ typedef struct {
 } RATE_TABLE_11N;
 
 /*
+ * Sets rate control so frames will be aggregated in an A-MPDU. This means
+ * using a HT rate. We pick the lowest one for reliability.
+ */
+void rcForceAggrRate(struct ath_softc_tgt *sc,
+		     struct ath_node_target *an,
+		     struct ath_rc_series series[]);
+
+/*
  * Determines and returns the new Tx rate index.
  */ 
 void rcRateFind_11n(struct ath_softc_tgt *sc,

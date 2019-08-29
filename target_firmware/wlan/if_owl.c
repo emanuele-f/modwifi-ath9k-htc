@@ -58,6 +58,8 @@
 #include "if_athvar.h"
 #include "ah_desc.h"
 
+#include "modwifi.h"
+
 #define ath_tgt_free_skb  adf_nbuf_free
 
 #define OFDM_PLCP_BITS          22
@@ -1312,6 +1314,7 @@ static void
 ath_tgt_txq_schedule(struct ath_softc_tgt *sc, struct ath_txq *txq)
 {
 	struct ath_atx_tid  *tid;
+	struct ath_tx_buf *bf;
 	u_int8_t bdone;
 
 	bdone = AH_FALSE;
@@ -1322,12 +1325,18 @@ ath_tgt_txq_schedule(struct ath_softc_tgt *sc, struct ath_txq *txq)
 		if (tid == NULL)
 			return;
 
+		PRINTK_AMPDU("txq_s aggr=");
+		PRINTK_AMPDU(itox(!!(tid->flag & TID_AGGR_ENABLED)));
+		PRINTK_AMPDU("\n");
+
 		tid->sched = AH_FALSE;
 
 		if (tid->paused)
 			continue;
 
-		if (!(tid->flag & TID_AGGR_ENABLED))
+		bf = asf_tailq_first(&tid->buf_q);
+
+		if (!(tid->flag & TID_AGGR_ENABLED) && !modwifi_txampdu_check(bf->bf_skb, NULL))
 			ath_tgt_tx_sched_normal(sc,tid);
 		else
 			ath_tgt_tx_sched_aggr(sc,tid);
@@ -1364,14 +1373,26 @@ ath_tgt_handle_aggr(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 			(!asf_tailq_empty(&tid->buf_q)) ||
 			(tid->paused) || (!within_baw) );
 
+	// If the next frame is marked to be injected as A-MPDU,
+	// then we force queueing it so it's later send as A-MPDU.
+	if (modwifi_txampdu_check(bf->bf_skb, NULL)) {
+		queue_frame = 1;
+		PRINTK_AMPDU("handle_aggr: force\n");
+	}
+
 	if (queue_frame) {
 		asf_tailq_insert_tail(&tid->buf_q, bf, bf_list);
 		ath_tgt_tx_enqueue(txq, tid);
 	} else {
+		PRINTK_AMPDU("handle_aggr: send normal\n");
 		ath_tx_addto_baw(tid, bf);
 		__stats(sc, txaggr_nframes);
 		ath_tgt_tx_send_normal(sc, bf);
 	}
+
+	// Only start if all the frames are here
+	if (modwifi_txampdu_check(bf->bf_skb, NULL))
+		ath_aggr_resume_tid(sc, tid);
 }
 
 static void
@@ -1385,6 +1406,9 @@ ath_tgt_tx_sched_normal(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 			break;
 
 		bf = asf_tailq_first(&tid->buf_q);
+		if (modwifi_txampdu_check(bf->bf_skb, NULL))
+			break;
+
 		asf_tailq_remove(&tid->buf_q, bf, bf_list);
 		ath_tgt_tx_send_normal(sc, bf);
 
@@ -1400,8 +1424,17 @@ ath_tgt_tx_sched_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 	struct ath_txq *txq = TID_TO_ACTXQ(tid->tidno);
 	struct ath_tx_desc *ds = NULL;
 	struct ath_hal *ah = sc->sc_ah;
-	int i;
+	u_int8_t first_is_ampdu = 0;
+	int i = 0;
 
+#ifdef DEBUG_INJECT_AMPDU
+	asf_tailq_foreach(bf, &tid->buf_q, bf_list) {
+		i++;
+	}
+	printk("sched_aggr pending=");
+	printk(itox(i));
+	printk("\n");
+#endif
 
 	if (asf_tailq_empty(&tid->buf_q))
 		return;
@@ -1410,8 +1443,17 @@ ath_tgt_tx_sched_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 		if (asf_tailq_empty(&tid->buf_q))
 			break;
 
+		bf = asf_tailq_first(&tid->buf_q);
+		if (!modwifi_ampdu_ready(bf, &first_is_ampdu)) {
+			PRINTK_AMPDU("sched_aggr !ready\n");
+			return;
+		}
+
 		asf_tailq_init(&bf_q);
 
+		/**
+		 * NetBSD also first check if it's within the Block Ack window.
+		 */
 		status = ath_tgt_tx_form_aggr(sc, tid, &bf_q);
 
 		if (asf_tailq_empty(&bf_q))
@@ -1420,7 +1462,9 @@ ath_tgt_tx_sched_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 		bf = asf_tailq_first(&bf_q);
 		bf_last = asf_tailq_last(&bf_q, ath_tx_bufhead_s);
 
-		if (bf->bf_nframes == 1) {
+		// If it's a single frame send as a non-aggregate
+		if (bf->bf_nframes == 1 && !first_is_ampdu) {
+			PRINTK_AMPDU(" tx_non-aggr");
 
 			if(bf->bf_retries == 0)
 				__stats(sc, txaggr_single);
@@ -1437,6 +1481,10 @@ ath_tgt_tx_sched_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 
 			continue;
 		}
+
+		PRINTK_AMPDU("  tx aggr num=");
+		PRINTK_AMPDU(itox(bf->bf_nframes));
+		PRINTK_AMPDU("\n");
 
 		bf_last->bf_next = NULL;
 		bf_last->bf_lastds->ds_link = 0;
@@ -1477,8 +1525,15 @@ static u_int32_t ath_lookup_rate(struct ath_softc_tgt *sc,
 		bf->bf_rcs[0].tries = ATH_TXMAXTRY - 1;
 		bf->bf_rcs[0].flags = 0;
 	} else {
+		// This eventually goes to `rcRateFind_11n`. This fills in bf->bf_rcs.
 		ath_tgt_rate_findrate(sc, an, AH_TRUE, 0, ATH_TXMAXTRY-1, 4, 1,
 				      ATH_RC_PROBE_ALLOWED, bf->bf_rcs, &prate);
+	}
+
+	if (modwifi_txampdu_check(bf->bf_skb, NULL)) {
+		PRINTK_AMPDU("    force HT rate\n");
+		rcForceAggrRate(sc, an, bf->bf_rcs);
+		prate = 0;
 	}
 
 	max4msframelen = IEEE80211_AMPDU_LIMIT_MAX;
@@ -1510,6 +1565,64 @@ static u_int32_t ath_lookup_rate(struct ath_softc_tgt *sc,
 	return aggr_limit;
 }
 
+int modwifi_txampdu_check(adf_nbuf_t skb, u_int8_t *last_frag)
+{
+	a_uint8_t *data, *magic_end;
+	a_int32_t len;
+
+	adf_nbuf_peek_header(skb, &data, &len);
+	if (len < 5) return 0;
+
+	magic_end = data + len - 4;
+	if (magic_end[0] != 'A' ||
+	    magic_end[1] != 'G' ||
+	    magic_end[2] != 'G' ||
+	    magic_end[3] != 'R')
+		return 0;
+
+	if (last_frag != NULL)
+		*last_frag = magic_end[-1];
+
+	return 1;
+}
+
+int modwifi_ampdu_strip(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
+{
+	adf_nbuf_trim_tail(bf->bf_skb, 5);
+	bf->bf_pktlen -= 5;
+
+	ath_tx_tgt_setds(sc, bf);
+}
+
+int modwifi_ampdu_ready(struct ath_tx_buf *bf, u_int8_t *first_is_ampdu)
+{
+	// All other frames are considered ready
+	if (!modwifi_txampdu_check(bf->bf_skb, NULL)) {
+		if (first_is_ampdu)
+			*first_is_ampdu = 0;
+		return 1;
+	}
+
+	if (first_is_ampdu)
+		*first_is_ampdu = 1;
+
+	// If we find an ending frame, which may be the first and only
+	// frame, we are ready.
+	while (bf != NULL) {
+		u_int8_t last_frag = 0;
+
+		if (!modwifi_txampdu_check(bf->bf_skb, &last_frag))
+			return 1;
+		if (last_frag)
+			return 1;
+
+		bf = asf_tailq_next(bf, bf_list);
+	}
+
+	// Otherwise we are not ready
+	return 0;
+}
+
 int ath_tgt_tx_form_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid,
 			 ath_tx_bufhead *bf_q)
 {
@@ -1520,8 +1633,15 @@ int ath_tgt_tx_form_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid,
 	struct ath_hal *ah = sc->sc_ah;
 	u_int16_t aggr_limit =  (64*1024 -1), al = 0, bpad = 0, al_delta;
 	u_int16_t h_baw = tid->baw_size/2, prev_al = 0, prev_frames = 0;
+	u_int8_t txampdu_first = 0, txampdu_last_frag = 0, txampdu = 0, txampdu_done = 0;
 
 	bf_first = asf_tailq_first(&tid->buf_q);
+	txampdu_first = modwifi_txampdu_check(bf_first->bf_skb, NULL);
+
+#ifdef DEBUG_INJECT_AMPDU
+	if (txampdu_first)
+		printk("   AGGR_FIRST\n");
+#endif
 
 	do {
 		bf = asf_tailq_first(&tid->buf_q);
@@ -1529,20 +1649,51 @@ int ath_tgt_tx_form_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid,
 
 		if (!BAW_WITHIN(tid->seq_start, tid->baw_size,
 				SEQNO_FROM_BF_SEQNO(bf->bf_seqno))) {
-
+			PRINTK_AMPDU("  BAW_CLOSED\n");
 			bf_first->bf_al= al;
 			bf_first->bf_nframes = nframes;
 			return ATH_TGT_AGGR_BAW_CLOSED;
 		}
 
+		/**
+		 * From FreeBSD: "Do a rate control lookup on the first frame in the
+		 * list. The rate control code needs that to occur before it can
+		 * determine whether to TX. It's inaccurate because the rate control
+		 * code doesn't really "do" aggregate lookups, so it only considers
+		 * the size of the first frame."
+		 */
 		if (!rl) {
 			aggr_limit = ath_lookup_rate(sc, tid->an, bf);
 			rl = 1;
+			PRINTK_AMPDU("   aggr_limit=");
+			PRINTK_AMPDU(itox(aggr_limit));
+			PRINTK_AMPDU("\n");
+		}
+
+		// Handle force A-MPDU flags
+		txampdu = modwifi_txampdu_check(bf->bf_skb, &txampdu_last_frag);
+		if ( (!txampdu_first && txampdu) ||  // next frame is start of requested A-AMPDU
+		     (txampdu_first && !txampdu) ) { // next frame is unexpected normal frame
+			PRINTK_AMPDU("   AGGR_NEXT|UNEXP\n");
+			bf_first->bf_al= al;
+			bf_first->bf_nframes = nframes;
+			return ATH_TGT_AGGR_LIMITED;
+		} else if (txampdu_first && txampdu_last_frag) {
+			// Include last subframe into the A-AMPDU, and then stop
+			txampdu_done = 1;
+		}
+
+		// Strip the extra tailer of requested A-MPDU frames, and don't
+		// try to retransmit these individual subframes.
+		if (txampdu) {
+			bf->bf_retries = OWLMAX_RETRIES;
+			modwifi_ampdu_strip(sc, bf);
 		}
 
 		al_delta = ATH_AGGR_DELIM_SZ + bf->bf_pktlen;
 
 		if (nframes && (aggr_limit < (al + bpad + al_delta + prev_al))) {
+			PRINTK_AMPDU("  AGGR_LIMIT1\n");
 			bf_first->bf_al= al;
 			bf_first->bf_nframes = nframes;
 			return ATH_TGT_AGGR_LIMITED;
@@ -1553,6 +1704,7 @@ int ath_tgt_tx_form_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid,
 #else
 		if ((nframes + prev_frames) >= ATH_MIN((h_baw), 22)) {
 #endif
+			PRINTK_AMPDU("  AGGR_LIMIT2\n");
 			bf_first->bf_al= al;
 			bf_first->bf_nframes = nframes;
 			return ATH_TGT_AGGR_LIMITED;
@@ -1596,7 +1748,12 @@ int ath_tgt_tx_form_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid,
 		for(ds = bf->bf_desc; ds <= bf->bf_lastds; ds++)
 			ah->ah_set11nAggrMiddle(ds, bf->bf_ndelim);
 
-	} while (!asf_tailq_empty(&tid->buf_q));
+#ifdef DEBUG_INJECT_AMPDU
+		if (txampdu_done)
+			printk("   AGGR_DONE\n");
+#endif
+
+	} while (!asf_tailq_empty(&tid->buf_q) && !txampdu_done);
 
 	bf_first->bf_al= al;
 	bf_first->bf_nframes = nframes;
@@ -1691,6 +1848,7 @@ void ath_tgt_tx_comp_aggr(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 			ath_tx_status_update_aggr(sc, bf, ds, rcs, 1);
 			ath_tx_freebuf(sc, bf);
 		} else {
+			PRINTK_AMPDU("comp_aggr: retry\n");
 			ath_tx_retry_subframe(sc, bf, &bf_q, &bar);
 			nbad ++;
 		}
@@ -1708,6 +1866,7 @@ void ath_tgt_tx_comp_aggr(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 		__stats(sc, txaggr_prepends);
 		TAILQ_INSERTQ_HEAD(&tid->buf_q, &bf_q, bf_list);
 		ath_tgt_tx_enqueue(txq, tid);
+		PRINTK_AMPDU("comp_aggr: tx_enqueue\n");
 	}
 }
 
@@ -1733,6 +1892,7 @@ ath_tx_comp_aggr_error(struct ath_softc_tgt *sc, struct ath_tx_buf *bf,
 	adf_os_mem_copy(rcs, bf->bf_rcs, sizeof(rcs));
 
 	while (bf) {
+		PRINTK_AMPDU("aggr_err retry\n");
 		bf_next = bf->bf_next;
 		ath_tx_retry_subframe(sc, bf, &bf_q, &bar);
 		bf = bf_next;
@@ -1908,6 +2068,7 @@ ath_tx_comp_unaggr(struct ath_softc_tgt *sc, struct ath_tx_buf *bf)
 	ath_rate_tx_complete(sc, an, ds, bf->bf_rcs, 1, 0);
 
 	if (ATH_DS_TX_STATUS(ds) & HAL_TXERR_XRETRY) {
+		PRINTK_AMPDU("comp_unaggr: retry\n");
 		ath_tx_retry_unaggr(sc, bf);
 		return;
 	}

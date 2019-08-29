@@ -615,6 +615,22 @@ rcRateGetIndex(struct ath_softc_tgt *sc, struct ath_node_target *an,
 	return rix;
 }
 
+void rcForceAggrRate(struct ath_softc_tgt *sc, struct ath_node_target *an, struct ath_rc_series series[])
+{
+	struct atheros_softc *asc = (struct atheros_softc*)sc->sc_rc;
+	RATE_TABLE_11N *pRateTable = (RATE_TABLE_11N *)asc->hwRateTable[sc->sc_curmode];
+	struct atheros_node *asn = ATH_NODE_ATHEROS(an);
+	A_UINT8 nrix, tries;
+
+	// Only enable one rate, and send that frame once
+	series[1].tries = series[2].tries = series[3].tries = 0;
+
+	tries = 1; // ATH_TXMAXTRY - 1 seemed to cause unneeded retransmissions.
+	nrix = 0xd; // lowest HT rate control. See ar5416Phy.c rate table.
+	rcRateSetseries(pRateTable, &series[0], tries, nrix,
+			FALSE, asc->tx_chainmask, asn->stbc);
+}
+
 void rcRateFind_11n(struct ath_softc_tgt *sc, struct ath_node_target *an, 
 		    int numTries, int numRates, int stepDnInc,
 		    unsigned int rcflag, struct ath_rc_series series[], int *isProbe)
