@@ -1,6 +1,12 @@
 This is the firmware for the Qualcomm Atheros AR7010 and AR9271 USB
 802.11n NICs.
 
+Research notes
+--------------
+
+See the file target_firmware/wlan/modwifi.h for #define's that can
+be used to debug research additions.
+
 What is this exactly?
 ---------------------
 
