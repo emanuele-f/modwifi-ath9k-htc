@@ -1444,6 +1444,10 @@ ath_tgt_tx_sched_aggr(struct ath_softc_tgt *sc, ath_atx_tid_t *tid)
 			break;
 
 		bf = asf_tailq_first(&tid->buf_q);
+		/**
+		 * Are all frames that we are supposed to aggregate in the queue?
+		 * That is, is the ending frame in the queue?
+		 */
 		if (!modwifi_ampdu_ready(bf, &first_is_ampdu)) {
 			PRINTK_AMPDU("sched_aggr !ready\n");
 			return;
@@ -1531,6 +1535,7 @@ static u_int32_t ath_lookup_rate(struct ath_softc_tgt *sc,
 	}
 
 	if (modwifi_txampdu_check(bf->bf_skb, NULL)) {
+		// We must set a HT rate, because only those are aggregated.
 		PRINTK_AMPDU("    force HT rate\n");
 		rcForceAggrRate(sc, an, bf->bf_rcs);
 		prate = 0;

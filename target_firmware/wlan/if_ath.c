@@ -1847,7 +1847,8 @@ static void ath_fastreply(void *Context, A_UINT16 Command,
 
 		if (replylen == cmd->pkt.offset + cmd->pkt.datalen) {
 			// FIXME: This memory needs to be properly freed
-			bf = attack_build_packet(sc, reply, replylen, 1, NULL);
+			int waitack = !(reply[4] & 0x01); // Don't wait for ACK on group-addressed frames
+			bf = attack_build_packet(sc, reply, replylen, waitack, NULL);
 			if (bf == NULL) rval = 1;
 		}
 	}
