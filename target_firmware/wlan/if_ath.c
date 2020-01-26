@@ -1855,9 +1855,12 @@ static void ath_fastreply(void *Context, A_UINT16 Command,
 	{
 		unsigned int duration = adf_os_ntohl(cmd->start.mduration);
 
-		// TODO: fastreply using `bf` as a packet
-		(void)duration;
-		printk("start fastreply\n");
+		if (bf != NULL) {
+			rval = attack_fastreply(sc, bf, cmd->start.source, duration, cmd->start.jam);
+		} else {
+			rval = 2;
+			printk("fastreply no bf\n");
+		}
 	}
 
 	wmi_cmd_rsp(sc->tgt_wmi_handle, Command, SeqNo, &rval, sizeof(rval));
@@ -1881,7 +1884,7 @@ static void ath_constantjam(void *Context, A_UINT16 Command,
 		if (cmd->conf_radio) {
 			// jamming of the channel, other clients can't see any traffic and sense channel busy
 			printk("contjam+radio\n");
-			attack_confradio(sc);
+			attack_confradio(sc, 1);
 			attack_constantjam_start(sc, 0, NULL, cmd->len);
 		} else {
 			// uninterrupted packet injection, useful to test number of packets per second possible

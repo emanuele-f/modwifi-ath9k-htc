@@ -332,6 +332,7 @@ typedef PREPACK struct {
 		struct {
 			a_uint32_t mduration;
 			a_uint8_t source[6];
+			a_uint8_t jam;
 		} start;
 	};
 } POSTPACK WMI_FASTREPLY_CMD;
