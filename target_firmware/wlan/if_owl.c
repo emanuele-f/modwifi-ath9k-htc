@@ -932,14 +932,13 @@ static a_int32_t ath_tgt_txbuf_setup(struct ath_softc_tgt *sc,
 	else
 		bf->bf_shpream = AH_FALSE;
 
+	bf->bf_flags = HAL_TXDESC_CLRDMASK;
+	bf->bf_atype = HAL_PKT_TYPE_NORMAL;
+
 	if (flags & ATH_HTC_TX_NO_ACK) {
 		printk("NoAck1\n");
 		bf->bf_flags |= HAL_TXDESC_NOACK;
 	}
-
-
-	bf->bf_flags = HAL_TXDESC_CLRDMASK;
-	bf->bf_atype = HAL_PKT_TYPE_NORMAL;
 
 	return 0;
 }
